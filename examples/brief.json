@@ -1,0 +1,17 @@
+{
+  "language": "en",
+  "title": "How to read a public budget",
+  "summary": "A practical walkthrough of revenue, spending and the questions to ask when comparing a public budget with last year's figures.",
+  "keywords": ["public budget", "reform", "transparency"],
+  "chapters": [
+    {"time": "00:00", "title": "Start with the totals"},
+    {"time": "00:30", "title": "Compare revenue and spending"},
+    {"time": "01:10", "title": "Questions for the next meeting"}
+  ],
+  "links": [
+    {"label": "Companion notes", "url": "https://example.org/budget?edition=2026"}
+  ],
+  "platforms": {
+    "x": {"text": "Read a public budget: compare totals, check changes and bring questions.", "hashtags": ["#PublicBudget"]}
+  }
+}
