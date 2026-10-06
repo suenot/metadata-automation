@@ -11,7 +11,10 @@ import sys
 import tempfile
 import tomllib
 
-from .metadata import PLATFORMS, ValidationError, extract, generate, schema, validate
+from .metadata import (
+    SCHEMA_VERSION, SCHEMA_VERSIONS, V2_PLATFORMS, ValidationError,
+    extract, generate, schema, validate,
+)
 
 
 def _version() -> str:
@@ -64,18 +67,24 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Derive metadata drafts from one editorial JSON brief.")
     parser.add_argument("--version", action="version", version=f"metadata-automation {_version()}")
     commands = parser.add_subparsers(dest="command", required=True)
-    create = commands.add_parser("generate", help="Generate the nine-platform metadata envelope")
+    create = commands.add_parser("generate", help="Generate a metadata envelope (nine platforms by default)")
     create.add_argument("brief", help="Brief JSON path, or - for stdin")
     create.add_argument("-o", "--output", help="Output JSON path; default: stdout")
     create.add_argument("--youtube-metadata", help="Import validated flat YouTube title/description/tags JSON")
+    create.add_argument("--schema-version", choices=SCHEMA_VERSIONS, default=SCHEMA_VERSION,
+                        help="Envelope and brief schema version; default: %(default)s")
     check = commands.add_parser("validate", help="Validate against a bundled JSON Schema")
     check.add_argument("input", help="JSON path, or - for stdin")
     check.add_argument("--kind", choices=("brief", "metadata"), default="metadata")
+    check.add_argument("--schema-version", choices=SCHEMA_VERSIONS,
+                       help="Brief schema version (default: 1.0.0), or required metadata version")
     publish_schema = commands.add_parser("schema", help="Export the published Draft 2020-12 schema")
     publish_schema.add_argument("--kind", choices=("brief", "metadata"), default="metadata")
+    publish_schema.add_argument("--schema-version", choices=SCHEMA_VERSIONS, default=SCHEMA_VERSION,
+                                help="Schema version; default: %(default)s")
     publish_schema.add_argument("-o", "--output", help="Output JSON path; default: stdout")
     select = commands.add_parser("extract", help="Extract one validated platform block")
-    select.add_argument("platform", choices=PLATFORMS)
+    select.add_argument("platform", choices=V2_PLATFORMS)
     select.add_argument("metadata", help="Metadata envelope JSON path, or - for stdin")
     select.add_argument("-o", "--output", help="Output JSON path; default: stdout")
     return parser
@@ -88,12 +97,13 @@ def main(argv: list[str] | None = None) -> int:
             if arguments.brief == "-" and arguments.youtube_metadata == "-":
                 raise ValidationError("Only one input can use stdin")
             imported = _read(arguments.youtube_metadata) if arguments.youtube_metadata else None
-            _write(generate(_read(arguments.brief), imported), arguments.output)
+            _write(generate(_read(arguments.brief), imported,
+                            schema_version=arguments.schema_version), arguments.output)
         elif arguments.command == "validate":
-            validate(_read(arguments.input), arguments.kind)
+            validate(_read(arguments.input), arguments.kind, schema_version=arguments.schema_version)
             print(f"Valid {arguments.kind} document.", file=sys.stderr)
         elif arguments.command == "schema":
-            _write(schema(arguments.kind), arguments.output)
+            _write(schema(arguments.kind, arguments.schema_version), arguments.output)
         else:
             _write(extract(_read(arguments.metadata), arguments.platform), arguments.output)
     except (ValidationError, OSError, UnicodeError, ValueError) as error:

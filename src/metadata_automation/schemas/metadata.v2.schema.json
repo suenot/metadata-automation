@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:reforms-ai:metadata-automation:metadata:2.0.0",
+  "title": "Video metadata envelope 2.0.0",
+  "description": "Editorial drafts. Publisher execution arguments are deliberately outside this document. All references are local.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source",
+    "platforms"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "2.0.0"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "language",
+        "title",
+        "brief_sha256"
+      ],
+      "properties": {
+        "language": {
+          "$ref": "#/$defs/singleLine"
+        },
+        "title": {
+          "$ref": "#/$defs/singleLine"
+        },
+        "brief_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "youtube_metadata_sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "platforms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "youtube",
+        "facebook",
+        "instagram",
+        "tiktok",
+        "x",
+        "threads",
+        "linkedin",
+        "vimeo",
+        "vk",
+        "pinterest"
+      ],
+      "properties": {
+        "youtube": {
+          "$ref": "#/$defs/video"
+        },
+        "facebook": {
+          "$ref": "#/$defs/caption"
+        },
+        "instagram": {
+          "$ref": "#/$defs/caption"
+        },
+        "tiktok": {
+          "$ref": "#/$defs/caption"
+        },
+        "x": {
+          "$ref": "#/$defs/text"
+        },
+        "threads": {
+          "$ref": "#/$defs/text"
+        },
+        "linkedin": {
+          "$ref": "#/$defs/text"
+        },
+        "vimeo": {
+          "$ref": "#/$defs/video"
+        },
+        "vk": {
+          "$ref": "#/$defs/video"
+        },
+        "pinterest": {
+          "$ref": "#/$defs/pinterest"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "singleLine": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\r\\n\\t]+$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "tags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/singleLine"
+      }
+    },
+    "hashtags": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Tokens include #; bodies contain Unicode letters, numbers, marks or underscores. Tokens must occur exactly once, case insensitively and outside URLs, in the authoritative caption/text/description. Publishers must not append them again.",
+      "items": {
+        "type": "string",
+        "minLength": 2,
+        "pattern": "^#[^\\s#]+$"
+      }
+    },
+    "video": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "description",
+        "tags"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/singleLine"
+        },
+        "description": {
+          "type": "string"
+        },
+        "tags": {
+          "$ref": "#/$defs/tags"
+        }
+      }
+    },
+    "caption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caption",
+        "hashtags"
+      ],
+      "properties": {
+        "caption": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Complete authoritative draft, including any hashtags."
+        },
+        "hashtags": {
+          "$ref": "#/$defs/hashtags"
+        }
+      }
+    },
+    "text": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "hashtags"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Complete authoritative draft, including any hashtags."
+        },
+        "hashtags": {
+          "$ref": "#/$defs/hashtags"
+        }
+      }
+    },
+    "pinterest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "description",
+        "hashtags"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/singleLine"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Complete authoritative draft, including any hashtags. Publication limits are checked by the publisher."
+        },
+        "hashtags": {
+          "$ref": "#/$defs/hashtags"
+        }
+      }
+    }
+  }
+}

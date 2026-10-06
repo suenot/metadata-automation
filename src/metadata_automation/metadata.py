@@ -14,10 +14,12 @@ from urllib.parse import urlsplit
 from jsonschema import Draft202012Validator
 
 SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSIONS = (SCHEMA_VERSION, "2.0.0")
 PLATFORMS = (
     "youtube", "facebook", "instagram", "tiktok", "x", "threads",
     "linkedin", "vimeo", "vk",
 )
+V2_PLATFORMS = (*PLATFORMS, "pinterest")
 VIDEO_PLATFORMS = frozenset(("youtube", "vimeo", "vk"))
 CAPTION_PLATFORMS = frozenset(("facebook", "instagram", "tiktok"))
 
@@ -26,17 +28,24 @@ class ValidationError(ValueError):
     """An input cannot be represented by the published metadata contract."""
 
 
-@lru_cache(maxsize=2)
-def schema(kind: str = "metadata") -> dict:
+def _check_schema_version(schema_version: str) -> None:
+    if schema_version not in SCHEMA_VERSIONS:
+        raise ValidationError(f"Unsupported schema version: {schema_version}")
+
+
+@lru_cache(maxsize=4)
+def schema(kind: str = "metadata", schema_version: str = SCHEMA_VERSION) -> dict:
     if kind not in ("brief", "metadata"):
         raise ValidationError(f"Unknown document kind: {kind}")
-    resource = files("metadata_automation").joinpath("schemas", f"{kind}.schema.json")
+    _check_schema_version(schema_version)
+    suffix = ".v2" if schema_version == "2.0.0" else ""
+    resource = files("metadata_automation").joinpath("schemas", f"{kind}{suffix}.schema.json")
     return json.loads(resource.read_text(encoding="utf-8"))
 
 
-@lru_cache(maxsize=2)
-def _validator(kind: str) -> Draft202012Validator:
-    document = schema(kind)
+@lru_cache(maxsize=4)
+def _validator(kind: str, schema_version: str) -> Draft202012Validator:
+    document = schema(kind, schema_version)
     Draft202012Validator.check_schema(document)
     return Draft202012Validator(document)
 
@@ -106,7 +115,10 @@ def _check_block(block: dict, platform: str, *, complete: bool) -> None:
             if complete and len({tag.casefold() for tag in block["tags"]}) != len(block["tags"]):
                 raise ValidationError(f"{location}.tags: duplicate tags")
     else:
-        field = "caption" if platform in CAPTION_PLATFORMS else "text"
+        if platform == "pinterest" and "title" in block:
+            _single_line(block["title"], location + ".title")
+        field = ("description" if platform == "pinterest" else
+                 "caption" if platform in CAPTION_PLATFORMS else "text")
         if field in block and not block[field].strip():
             raise ValidationError(f"{location}.{field}: expected nonempty text")
         hashtags = block.get("hashtags", [])
@@ -121,9 +133,13 @@ def _check_block(block: dict, platform: str, *, complete: bool) -> None:
             raise ValidationError(f"{location}.hashtags: duplicate hashtags")
 
 
-def validate(value: object, kind: str = "metadata") -> None:
+def validate(value: object, kind: str = "metadata", *, schema_version: str | None = None) -> None:
     """Check the bundled Draft 2020-12 schema, then semantic text invariants."""
-    _check_schema(value, _validator(kind))
+    if kind == "metadata" and schema_version is None and isinstance(value, dict):
+        schema_version = value.get("schema_version", SCHEMA_VERSION)
+    schema_version = SCHEMA_VERSION if schema_version is None else schema_version
+    _check_schema_version(schema_version)
+    _check_schema(value, _validator(kind, schema_version))
     _check_strings(value)
     assert isinstance(value, dict)
     if kind == "brief":
@@ -218,9 +234,10 @@ def _append_hashtags(text: str, hashtags: list[str]) -> str:
     return _join([text, " ".join(missing)])
 
 
-def generate(brief: dict, youtube_metadata: dict | None = None) -> dict:
+def generate(brief: dict, youtube_metadata: dict | None = None, *,
+             schema_version: str = SCHEMA_VERSION) -> dict:
     """Derive drafts from the supplied editorial facts, without external I/O."""
-    validate(brief, "brief")
+    validate(brief, "brief", schema_version=schema_version)
     if youtube_metadata is not None:
         validate_youtube(youtube_metadata)
         if "youtube" in brief.get("platforms", {}):
@@ -240,7 +257,7 @@ def generate(brief: dict, youtube_metadata: dict | None = None) -> dict:
     if youtube_metadata is not None:
         source["youtube_metadata_sha256"] = _digest(_youtube_fields(youtube_metadata))
     platforms = {}
-    for platform in PLATFORMS:
+    for platform in V2_PLATFORMS if schema_version == "2.0.0" else PLATFORMS:
         override = brief.get("platforms", {}).get(platform, {})
         if platform in VIDEO_PLATFORMS:
             block = {"title": _text(override.get("title", title)),
@@ -249,22 +266,27 @@ def generate(brief: dict, youtube_metadata: dict | None = None) -> dict:
             if platform == "youtube" and youtube_metadata is not None:
                 block = deepcopy(_youtube_fields(youtube_metadata))
         else:
-            field = "caption" if platform in CAPTION_PLATFORMS else "text"
-            base = short_text if platform in ("x", "threads") else caption
+            field = ("description" if platform == "pinterest" else
+                     "caption" if platform in CAPTION_PLATFORMS else "text")
+            base = short_text if platform in ("x", "threads", "pinterest") else caption
             body = _text(override.get(field, base))
             tokens = _unique(override.get("hashtags", hashtags))
             # Preserve an existing token's spelling while avoiding another casing.
             tokens = [matches[0] if (matches := _hashtag_matches(body, tag)) else tag for tag in tokens]
             block = {field: _append_hashtags(body, tokens),
                      "hashtags": tokens}
+            if platform == "pinterest":
+                block = {"title": _text(override.get("title", title)), **block}
         platforms[platform] = block
-    result = {"schema_version": SCHEMA_VERSION, "source": source, "platforms": platforms}
+    result = {"schema_version": schema_version, "source": source, "platforms": platforms}
     validate(result)
     return result
 
 
 def extract(metadata: dict, platform: str) -> dict:
     validate(metadata)
-    if platform not in PLATFORMS:
+    if platform not in V2_PLATFORMS:
         raise ValidationError(f"Unknown platform: {platform}")
+    if platform == "pinterest" and metadata["schema_version"] != "2.0.0":
+        raise ValidationError("Pinterest extraction requires schema version 2.0.0")
     return deepcopy(metadata["platforms"][platform])

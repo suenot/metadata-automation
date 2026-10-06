@@ -12,7 +12,8 @@ from jsonschema import Draft202012Validator
 
 from metadata_automation.cli import main
 from metadata_automation.metadata import (
-    PLATFORMS, ValidationError, extract, generate, schema, validate,
+    PLATFORMS, SCHEMA_VERSIONS, V2_PLATFORMS, ValidationError,
+    extract, generate, schema, validate,
 )
 
 
@@ -171,12 +172,169 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(result.stdout, "")
                 self.assertEqual(output.read_text(), "preserved")
 
+    def test_v2_generation_schema_brief_validation_and_extraction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output = root / "brief.json", root / "metadata.json"
+            value = brief()
+            value["platforms"] = {"pinterest": {"title": "Reviewed Pin"}}
+            source.write_text(json.dumps(value), encoding="utf-8")
+            generated = self.run_cli("generate", source, "--schema-version", "2.0.0", "-o", output)
+            self.assertEqual(generated.returncode, 0, generated.stderr)
+            result = json.loads(output.read_text())
+            self.assertEqual(result["schema_version"], "2.0.0")
+            self.assertEqual(self.run_cli("validate", output).returncode, 0)
+            self.assertEqual(self.run_cli("validate", output, "--schema-version", "1.0.0").returncode, 2)
+            self.assertEqual(self.run_cli("validate", source, "--kind", "brief",
+                                          "--schema-version", "2.0.0").returncode, 0)
+            self.assertEqual(self.run_cli("validate", source, "--kind", "brief").returncode, 2)
+            for kind in ("brief", "metadata"):
+                exported = self.run_cli("schema", "--kind", kind, "--schema-version", "2.0.0")
+                self.assertEqual(exported.returncode, 0, exported.stderr)
+                self.assertEqual(json.loads(exported.stdout), schema(kind, "2.0.0"))
+            extracted = self.run_cli("extract", "pinterest", output)
+            self.assertEqual(extracted.returncode, 0, extracted.stderr)
+            self.assertEqual(json.loads(extracted.stdout), result["platforms"]["pinterest"])
+            preserved = output.read_text()
+            rejected = self.run_cli("generate", source, "-o", output)
+            self.assertEqual(rejected.returncode, 2)
+            self.assertEqual(output.read_text(), preserved)
+
+    def test_pinterest_extraction_from_v1_and_unknown_version_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "metadata.json"
+            value = generate(brief())
+            source.write_text(json.dumps(value), encoding="utf-8")
+            rejected = self.run_cli("extract", "pinterest", source)
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn("requires schema version 2.0.0", rejected.stderr)
+            value["schema_version"] = "3.0.0"
+            source.write_text(json.dumps(value), encoding="utf-8")
+            rejected = self.run_cli("validate", source)
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn("Unsupported schema version", rejected.stderr)
+
     def test_stdin_stdout_and_single_stdin_input_rule(self):
         with patch("sys.stdin", io.StringIO(json.dumps(brief()))), patch("sys.stdout", new_callable=io.StringIO) as output:
             self.assertEqual(main(["generate", "-"]), 0)
             validate(json.loads(output.getvalue()))
         with patch("sys.stderr", new_callable=io.StringIO):
             self.assertEqual(main(["generate", "-", "--youtube-metadata", "-"]), 2)
+
+
+class MetadataV2Tests(unittest.TestCase):
+    def test_default_v1_and_additive_v2_generation(self):
+        value = brief()
+        old = generate(value)
+        result = generate(value, schema_version="2.0.0")
+        self.assertEqual(old["schema_version"], "1.0.0")
+        self.assertEqual(result["schema_version"], "2.0.0")
+        self.assertEqual(tuple(result["platforms"]), V2_PLATFORMS)
+        self.assertEqual(result["source"], old["source"])
+        for platform in PLATFORMS:
+            self.assertEqual(extract(result, platform), extract(old, platform))
+        self.assertEqual(result["platforms"]["pinterest"], {
+            "title": value["title"],
+            "description": "Read revenue and spending.\n\nNotes: https://example.org/notes?year=2026#sources\n\n#publicbudget #Reform #ბიუჯეტი",
+            "hashtags": ["#publicbudget", "#Reform", "#ბიუჯეტი"],
+        })
+        self.assertEqual(generate(dict(reversed(list(value.items()))), schema_version="2.0.0"), result)
+        for version in SCHEMA_VERSIONS:
+            for kind in ("brief", "metadata"):
+                Draft202012Validator.check_schema(schema(kind, version))
+        Draft202012Validator(schema("metadata", "2.0.0")).validate(result)
+
+    def test_partial_overrides_and_complete_hashtags_outside_urls(self):
+        value = brief()
+        value["platforms"] = {"pinterest": {"title": "Reviewed Pin"}}
+        result = generate(value, schema_version="2.0.0")
+        self.assertEqual(result["platforms"]["pinterest"]["title"], "Reviewed Pin")
+        self.assertEqual(result["platforms"]["pinterest"]["hashtags"], ["#publicbudget", "#Reform", "#ბიუჯეტი"])
+        value["platforms"]["pinterest"] = {"hashtags": []}
+        self.assertEqual(generate(value, schema_version="2.0.0")["platforms"]["pinterest"], {
+            "title": value["title"],
+            "description": "Read revenue and spending.\n\nNotes: https://example.org/notes?year=2026#sources",
+            "hashtags": [],
+        })
+        value["platforms"]["pinterest"] = {
+            "description": "  Reviewed\r\n#exact. https://example.org/#More  ",
+            "hashtags": ["#Exact", "#More"],
+        }
+        result = generate(value, schema_version="2.0.0")
+        self.assertEqual(extract(result, "pinterest"), {
+            "title": value["title"],
+            "description": "Reviewed\n#exact. https://example.org/#More\n\n#More",
+            "hashtags": ["#exact", "#More"],
+        })
+        value["platforms"]["pinterest"]["description"] = "Repeated #Exact and #exact"
+        with self.assertRaisesRegex(ValidationError, "exactly once in description"):
+            generate(value, schema_version="2.0.0")
+
+    def test_no_publication_limits_or_silent_truncation(self):
+        value = brief()
+        value["title"] = "💡" * 101
+        value["summary"] = "გ" * 801
+        generated = generate(value, schema_version="2.0.0")
+        self.assertEqual(generated["platforms"]["pinterest"]["title"], value["title"])
+        self.assertTrue(generated["platforms"]["pinterest"]["description"].startswith(value["summary"]))
+        value["platforms"] = {"pinterest": {"title": "Reviewed " * 100,
+                                             "description": "Reviewed facts. " * 100,
+                                             "hashtags": []}}
+        generated = generate(value, schema_version="2.0.0")
+        self.assertEqual(generated["platforms"]["pinterest"]["title"], value["platforms"]["pinterest"]["title"].strip())
+        self.assertEqual(generated["platforms"]["pinterest"]["description"], value["platforms"]["pinterest"]["description"].strip())
+
+    def test_versions_and_v1_override_rejection(self):
+        value = brief()
+        value["platforms"] = {"pinterest": {"title": "Reviewed Pin"}}
+        validate(value, "brief", schema_version="2.0.0")
+        with self.assertRaises(ValidationError):
+            generate(value)
+        with self.assertRaises(ValidationError):
+            validate(value, "brief")
+        for version in ("0.0.0", "3.0.0", "unknown"):
+            with self.subTest(version=version):
+                with self.assertRaisesRegex(ValidationError, "Unsupported schema version"):
+                    schema(schema_version=version)
+                with self.assertRaisesRegex(ValidationError, "Unsupported schema version"):
+                    generate(brief(), schema_version=version)
+                result = generate(brief(), schema_version="2.0.0")
+                result["schema_version"] = version
+                with self.assertRaisesRegex(ValidationError, "Unsupported schema version"):
+                    validate(result)
+        with self.assertRaisesRegex(ValidationError, "requires schema version 2.0.0"):
+            extract(generate(brief()), "pinterest")
+
+    def test_v2_structural_and_semantic_invariants(self):
+        value = generate(brief(), schema_version="2.0.0")
+        mutations = [
+            lambda result: result["platforms"].pop("pinterest"),
+            lambda result: result["platforms"]["pinterest"].pop("title"),
+            lambda result: result["platforms"]["pinterest"].update(tags=[]),
+            lambda result: result["platforms"]["pinterest"].update(title="Two\nlines"),
+            lambda result: result["platforms"]["pinterest"].update(description=" ", hashtags=[]),
+            lambda result: result["platforms"]["pinterest"].update(description="Missing hashtags"),
+            lambda result: result["platforms"]["pinterest"].update(hashtags=["#bad-tag"]),
+            lambda result: result["platforms"]["pinterest"].update(hashtags=["#Reform", "#reform"]),
+        ]
+        for mutate in mutations:
+            changed = deepcopy(value)
+            mutate(changed)
+            with self.assertRaises(ValidationError):
+                validate(changed)
+        for override in ({}, {"title": " "}, {"description": " "}, {"tags": []}):
+            with self.subTest(override=override):
+                changed = brief()
+                changed["platforms"] = {"pinterest": override}
+                with self.assertRaises(ValidationError):
+                    generate(changed, schema_version="2.0.0")
+
+    def test_v2_legacy_import_preserved(self):
+        legacy = {"title": "Reviewed", "description": "Exact\nwhitespace\n", "tags": ["one"], "extra": "ignored"}
+        result = generate(brief(), legacy, schema_version="2.0.0")
+        self.assertEqual(extract(result, "youtube"), {name: legacy[name] for name in ("title", "description", "tags")})
+        self.assertIn("youtube_metadata_sha256", result["source"])
+        self.assertEqual(extract(result, "pinterest")["title"], brief()["title"])
 
 
 if __name__ == "__main__":

@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:reforms-ai:metadata-automation:brief:2.0.0",
+  "title": "Single-video editorial brief 2.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "language",
+    "title",
+    "summary"
+  ],
+  "properties": {
+    "language": {
+      "$ref": "#/$defs/singleLine"
+    },
+    "title": {
+      "$ref": "#/$defs/singleLine"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "keywords": {
+      "$ref": "#/$defs/tags"
+    },
+    "transcript": {
+      "type": "string",
+      "minLength": 1
+    },
+    "chapters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "time",
+          "title"
+        ],
+        "properties": {
+          "time": {
+            "type": "string",
+            "pattern": "^(?:[0-9]{2,}:)?[0-5][0-9]:[0-5][0-9]$",
+            "description": "MM:SS or HH:MM:SS, strictly increasing across chapters."
+          },
+          "title": {
+            "$ref": "#/$defs/singleLine"
+          }
+        }
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "label",
+          "url"
+        ],
+        "properties": {
+          "label": {
+            "$ref": "#/$defs/singleLine"
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^https?://[^\\s]+$",
+            "description": "Absolute HTTP(S) URL without embedded credentials; validated locally without fetching."
+          }
+        }
+      }
+    },
+    "platforms": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "youtube": {
+          "$ref": "#/$defs/videoOverride"
+        },
+        "facebook": {
+          "$ref": "#/$defs/captionOverride"
+        },
+        "instagram": {
+          "$ref": "#/$defs/captionOverride"
+        },
+        "tiktok": {
+          "$ref": "#/$defs/captionOverride"
+        },
+        "x": {
+          "$ref": "#/$defs/textOverride"
+        },
+        "threads": {
+          "$ref": "#/$defs/textOverride"
+        },
+        "linkedin": {
+          "$ref": "#/$defs/textOverride"
+        },
+        "vimeo": {
+          "$ref": "#/$defs/videoOverride"
+        },
+        "vk": {
+          "$ref": "#/$defs/videoOverride"
+        },
+        "pinterest": {
+          "$ref": "#/$defs/pinterestOverride"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "singleLine": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\r\\n\\t]+$"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/singleLine"
+      }
+    },
+    "hashtags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 2,
+        "pattern": "^#[^\\s#]+$"
+      }
+    },
+    "videoOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/singleLine"
+        },
+        "description": {
+          "type": "string"
+        },
+        "tags": {
+          "$ref": "#/$defs/tags"
+        }
+      }
+    },
+    "captionOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "caption": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hashtags": {
+          "$ref": "#/$defs/hashtags"
+        }
+      }
+    },
+    "textOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hashtags": {
+          "$ref": "#/$defs/hashtags"
+        }
+      }
+    },
+    "pinterestOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/singleLine"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Complete authoritative draft, including any hashtags. Publication limits are checked by the publisher."
+        },
+        "hashtags": {
+          "$ref": "#/$defs/hashtags"
+        }
+      },
+      "minProperties": 1
+    }
+  }
+}
